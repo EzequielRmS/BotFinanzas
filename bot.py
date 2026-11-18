@@ -138,11 +138,24 @@ def formatear_top(titulo, top):
 # ---------------------------------------------------------------------------
 # Gemini (Interactions API, sin estado: el historial lo guardamos en SQLite)
 # ---------------------------------------------------------------------------
+def historial_a_steps(historial):
+    """Convierte [{"role": "user"/"model", "content": texto}] (como se guarda en SQLite)
+    al formato de "steps" que pide la Interactions API."""
+    tipos = {"user": "user_input", "model": "model_output"}
+    return [
+        {
+            "type": tipos[msg["role"]],
+            "content": [{"type": "text", "text": msg["content"]}],
+        }
+        for msg in historial
+    ]
+
+
 def consultar_gemini(historial):
     interaction = gemini.interactions.create(
         model=GEMINI_MODEL,
         system_instruction=SYSTEM_PROMPT,
-        input=historial,
+        input=historial_a_steps(historial),
         store=False,  # sin estado: no se guarda nada del lado de Google
     )
     return (interaction.output_text or "").strip()
