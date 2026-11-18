@@ -13,14 +13,22 @@ con un asistente conversacional basado en Gemini (Interactions API, sin estado) 
 | `/top_acciones` | Top 10 acciones con mayor suba diaria (monto > $50.000) |
 | `/top_cedears` | Top 10 CEDEARs con mayor suba diaria (monto > $1.000.000) |
 | `/precio TICKER` | Detalle de un activo (ej: `/precio GGAL`) |
+| `/noticias TICKER` | Últimas noticias de una empresa, resumidas en español por Gemini (ej: `/noticias NVDA`) |
 | `/borrar` | Borra el historial de la conversación con la IA |
 
 Cualquier mensaje que **no** sea un comando se responde con Gemini, usando el historial guardado en SQLite.
 
+### Sobre `/noticias`
+
+- Las noticias salen de Yahoo Finance (vía `yfinance`) y Gemini las resume en español, sin agregar datos que no estén en las noticias. Al final se muestran los links a las fuentes.
+- El resumen se guarda en el historial, así después se puede seguir charlando sobre esas noticias con la IA.
+- Funciona con CEDEARs (empresas de EE.UU.) y con acciones argentinas que tienen ADR en Wall Street. Para las que tienen un ticker distinto en EE.UU., el bot lo traduce con el diccionario `TICKER_NOTICIAS` (por ejemplo, `YPFD` → `YPF`, `PAMP` → `PAM`).
+- Las acciones que solo cotizan en BYMA (por ejemplo, TXAR o ALUA) pueden no tener noticias en Yahoo.
+
 ## Estructura
 
 ```
-bot.py           # Handlers de Telegram, Yahoo Finance y llamada a Gemini
+bot.py           # Handlers de Telegram, Yahoo Finance (precios y noticias) y llamada a Gemini
 prompts.py       # Prompt de sistema (identidad, alcance, estilo, formato, honestidad)
 database.py      # Historial de conversación en SQLite
 .env.example     # Variables de entorno necesarias (copiar como .env)
