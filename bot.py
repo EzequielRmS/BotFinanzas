@@ -124,6 +124,46 @@ def obtener_detalle(simbolo):
         "monto": ultimo * volumen,
     }
 
+# Las acciones argentinas tienen noticias bajo el ticker de su ADR en EE.UU.
+TICKER_NOTICIAS = {
+    "YPFD": "YPF", "PAMP": "PAM", "TGSU2": "TGS", "CRES": "CRESY",
+}
+
+
+def obtener_noticias(simbolo, cantidad=5):
+    simbolo = simbolo.upper().replace(".BA", "")
+    simbolo = TICKER_NOTICIAS.get(simbolo, simbolo)
+    noticias = []
+    for item in (yf.Ticker(simbolo).news or [])[:cantidad]:
+        c = item.get("content", item)  # yfinance cambió el formato; soporta ambos
+        url = (c.get("canonicalUrl") or c.get("clickThroughUrl") or {}).get("url") or c.get("link")
+        fuente = (c.get("provider") or {}).get("displayName") or c.get("publisher", "")
+        noticias.append({
+            "titulo": c.get("title", "(sin título)"),
+            "resumen": c.get("summary", ""),
+            "fuente": fuente,
+            "url": url,
+        })
+    return simbolo, noticias
+
+
+def resumir_noticias(simbolo, noticias):
+    texto = "\n\n".join(
+        f"- {n['titulo']} ({n['fuente']})\n{n['resumen']}" for n in noticias
+    )
+    pedido = (
+        f"Estas son las últimas noticias sobre {simbolo} (en inglés, de Yahoo Finance):\n\n"
+        f"{texto}\n\n"
+        "Resumilas en español en 3 a 5 viñetas cortas y cerrá con una línea sobre el "
+        "posible impacto para un inversor. Usá solo esta información, no agregues datos."
+    )
+    interaction = gemini.interactions.create(
+        model=GEMINI_MODEL,
+        system_instruction=SYSTEM_PROMPT,
+        input=pedido,
+        store=False,
+    )
+    return (interaction.output_text or "").strip()
 
 def formatear_top(titulo, top):
     texto = f"{titulo}\n\n"
@@ -183,6 +223,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• /top\\_acciones - Top 10 acciones con mayor suba diaria (monto > $50.000)\n"
         "• /top\\_cedears - Top 10 CEDEARs con mayor suba diaria (monto > $1M)\n"
         "• `/precio TICKER` - Detalle de un activo (ej: `/precio GGAL`)\n"
+        "• `/noticias TICKER` - Noticias sobre un activo (ej: `/noticias GGAL`)\n"
         "• /borrar - Borra el historial de nuestra conversación\n\n"
         "💬 También podés escribirme sin comandos y charlamos sobre inversiones. "
         "Contame tu perfil (conservador, moderado, agresivo) y tus objetivos para "
@@ -270,6 +311,38 @@ async def precio(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await update.message.reply_text(respuesta, parse_mode="Markdown")
 
+async def noticias(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("Indicá un ticker. Ejemplo: /noticias NVDA")
+        return
+
+    await update.message.reply_text("📰 Buscando noticias...")
+    try:
+        simbolo, lista = await asyncio.to_thread(obtener_noticias, context.args[0])
+    except Exception as e:
+        logger.exception("Error en noticias")
+        await update.message.reply_text(f"⚠️ Error al consultar noticias: {e}")
+        return
+
+    if not lista:
+        await update.message.reply_text(f"No encontré noticias recientes de {simbolo}.")
+        return
+
+    try:
+        resumen = await asyncio.to_thread(resumir_noticias, simbolo, lista)
+    except Exception:
+        logger.exception("Error al resumir noticias")
+        resumen = ""
+
+    links = "\n".join(f"• {n['titulo']}\n  {n['url']}" for n in lista if n["url"])
+    respuesta = f"📰 *Noticias de {simbolo}*\n\n{resumen or 'No pude generar el resumen.'}\n\n🔗 Fuentes:\n{links}"
+
+    # Se guarda en el historial para que el chat con la IA pueda usar estas noticias
+    chat_id = update.effective_chat.id
+    database.guardar_mensaje(chat_id, "user", f"/noticias {simbolo}")
+    database.guardar_mensaje(chat_id, "model", f"Noticias de {simbolo}:\n{resumen}")
+
+    await update.message.reply_text(respuesta, disable_web_page_preview=True)
 
 async def borrar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cantidad = database.borrar_historial(update.effective_chat.id)
@@ -318,6 +391,7 @@ def main():
     app.add_handler(CommandHandler("top_acciones", top_acciones))
     app.add_handler(CommandHandler("top_cedears", top_cedears))
     app.add_handler(CommandHandler("precio", precio))
+    app.add_handler(CommandHandler("noticias", noticias))
     app.add_handler(CommandHandler("borrar", borrar))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, chat))
 
